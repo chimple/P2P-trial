@@ -1,6 +1,7 @@
 package chimple.org.p2p.wifi.direct;
 
 import android.os.Handler;
+import android.os.StrictMode;
 import android.util.Log;
 
 import java.io.IOException;
@@ -79,15 +80,22 @@ public class SocketManager implements Runnable {
     }
 
     public void write(byte[] message) {
-        try {
-            ByteBuffer sizeBuffer = ByteBuffer.allocate(Integer.SIZE / Byte.SIZE);
-            byte[] sizeArray = sizeBuffer.putInt(message.length).array();
-            byte[] completeMessage = new byte[sizeArray.length + message.length];
-            System.arraycopy(sizeArray, 0, completeMessage, 0, sizeArray.length);
-            System.arraycopy(message, 0, completeMessage, sizeArray.length, message.length);
-            outputStream.write(completeMessage);
-        } catch (IOException e) {
-            Log.e(TAG, "Exception during write", e);
+        int SDK_INT = android.os.Build.VERSION.SDK_INT;
+        if (SDK_INT > 8)
+        {
+            StrictMode.ThreadPolicy policy = new StrictMode.ThreadPolicy.Builder()
+                    .permitAll().build();
+            StrictMode.setThreadPolicy(policy);
+            try {
+                ByteBuffer sizeBuffer = ByteBuffer.allocate(Integer.SIZE / Byte.SIZE);
+                byte[] sizeArray = sizeBuffer.putInt(message.length).array();
+                byte[] completeMessage = new byte[sizeArray.length + message.length];
+                System.arraycopy(sizeArray, 0, completeMessage, 0, sizeArray.length);
+                System.arraycopy(message, 0, completeMessage, sizeArray.length, message.length);
+                outputStream.write(completeMessage);
+            } catch (IOException e) {
+                Log.e(TAG, "Exception during write", e);
+            }
         }
     }
 }

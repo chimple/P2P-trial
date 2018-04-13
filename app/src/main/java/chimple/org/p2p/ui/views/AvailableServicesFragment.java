@@ -51,7 +51,7 @@ public class AvailableServicesFragment extends Fragment {
         servicesListAdapter.notifyDataSetChanged();
         Log.d("TIMING", "Discovering started " + (new Date()).getTime());
         registerLocalP2pReceiver();
-        getHandler().continuouslyDiscoverServices();
+//        getHandler().continuouslyDiscoverServices();
         return rootView;
     }
 

@@ -52,7 +52,7 @@ public abstract class WifiDirectIntentService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         onStart(intent, startId);
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override

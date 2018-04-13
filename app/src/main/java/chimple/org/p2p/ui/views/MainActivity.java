@@ -209,7 +209,7 @@ public class MainActivity extends AppCompatActivity implements WiFiDirectHandler
 
     protected void onPause() {
         super.onPause();
-//        Log.i(TAG, "Pausing MainActivity");
+        Log.i(TAG, "Pausing MainActivity");
 //        if (wifiDirectHandlerBound) {
 //            Log.i(TAG, "WifiDirectHandler service unbound");
 //            unbindService(wifiServiceConnection);
@@ -221,9 +221,9 @@ public class MainActivity extends AppCompatActivity implements WiFiDirectHandler
     @Override
     protected void onResume() {
         super.onResume();
-        Log.i(TAG, "Resuming MainActivity");
+//        Log.i(TAG, "Resuming MainActivity");
 //        Intent intent = new Intent(this, WifiDirectHandler.class);
-//        if(!wifiDirectHandlerBound) {
+//        if (!wifiDirectHandlerBound) {
 //            bindService(intent, wifiServiceConnection, BIND_AUTO_CREATE);
 //        }
         Log.i(TAG, "MainActivity resumed");

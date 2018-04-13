@@ -25,6 +25,7 @@ import chimple.org.p2p.wifi.direct.WifiDirectHandler;
 public class MainFragment extends Fragment {
 
     public static String CHIMPLE_SERVICE_NAME = "CHIM_P2P";
+    public static final String TXTRECORD_PROP_AVAILABLE = "available";
     private WiFiDirectHandlerAccessor wifiDirectHandlerAccessor;
     private Switch toggleWifiSwitch;
     private Switch serviceRegistrationSwitch;
@@ -84,8 +85,7 @@ public class MainFragment extends Fragment {
                     // Add local service
                     if (getHandler().getWifiP2pServiceInfo() == null) {
                         HashMap<String, String> record = new HashMap<>();
-                        record.put("Name", getHandler().getThisDevice().deviceName);
-                        record.put("Address", getHandler().getThisDevice().deviceAddress);
+                        record.put(TXTRECORD_PROP_AVAILABLE, "visible");
                         getHandler().addLocalService(CHIMPLE_SERVICE_NAME, record);
                         noPromptServiceRegistrationSwitch.setEnabled(false);
                     } else {
@@ -96,6 +96,7 @@ public class MainFragment extends Fragment {
                     //getHandler().clearServiceDiscoveryRequests();
                     getHandler().stopServiceDiscovery();
                     getHandler().removeService();
+//                    getHandler().removeGroup();
                     getHandler().stopPeerDiscovery();
                     noPromptServiceRegistrationSwitch.setEnabled(true);
                 }
@@ -111,7 +112,7 @@ public class MainFragment extends Fragment {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 Log.i(TAG, "\nNo-Prompt Service Registration Switch Toggled");
                 if (isChecked) {
-                    getHandler().continuouslyDiscoverPeers();
+                    getHandler().startAddingNoPromptService(null);
                     serviceRegistrationSwitch.setEnabled(false);
                 } else {
                     // Remove no-prompt local service
@@ -133,6 +134,7 @@ public class MainFragment extends Fragment {
                     availableServicesFragment = new AvailableServicesFragment();
                 }
                 mainActivity.replaceFragment(availableServicesFragment);
+                getHandler().continuouslyDiscoverServices();
             }
         });
 

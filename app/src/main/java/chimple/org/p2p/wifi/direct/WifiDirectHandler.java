@@ -72,6 +72,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     public static final int COMMUNICATION_DISCONNECTED = 0x400 + 3;
     public static final int SERVER_PORT = 4545;
     private final int SERVICE_DISCOVERY_TIMEOUT = 30000;
+    private boolean hadConnection;
 
     private boolean isDiscovering = false;
     private boolean isGroupOwner = false;
@@ -83,7 +84,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     private Object peerDiscoveryLock = new Object();
     private Object wifiP2pDeviceLock = new Object();
     private WifiP2pDeviceList wifiP2pDeviceList;
-    private boolean isDiscoveringPeers = false;
+    //    private boolean isDiscoveringPeers = false;
     private Runnable postedPeerDiscoveryRunnable = null;
     //handle running peer discovery on an interval. Also required to rebroadcast any local service
     private int peerDiscoveryInterval = 30000;
@@ -152,7 +153,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         // initialize() registers the app with the Wi-Fi P2P framework
         // Channel is used to communicate with the Wi-Fi P2P framework
         // Main Looper is the Looper for the main thread of the current process
-        if(wifiP2pManager != null) {
+        if (wifiP2pManager != null) {
             channel = wifiP2pManager.initialize(this, getMainLooper(), null);
             Log.i(TAG, "Registered with Wi-Fi P2P framework");
         }
@@ -175,20 +176,23 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * Registers a WifiDirectBroadcastReceiver with an IntentFilter listening for P2P Actions
      */
     public void registerP2pReceiver() {
-        p2pBroadcastReceiver = new WifiDirectBroadcastReceiver();
-        IntentFilter intentFilter = new IntentFilter();
+        if (p2pBroadcastReceiver == null) {
+            p2pBroadcastReceiver = new WifiDirectBroadcastReceiver();
+            IntentFilter intentFilter = new IntentFilter();
 
-        // Indicates a change in the list of available peers
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
-        // Indicates a change in the Wi-Fi P2P status
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
-        // Indicates the state of Wi-Fi P2P connectivity has changed
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
-        // Indicates this device's details have changed.
-        intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION);
+            // Indicates a change in the list of available peers
+            intentFilter.addAction(WifiP2pManager.WIFI_P2P_PEERS_CHANGED_ACTION);
+            // Indicates a change in the Wi-Fi P2P status
+            intentFilter.addAction(WifiP2pManager.WIFI_P2P_STATE_CHANGED_ACTION);
+            // Indicates the state of Wi-Fi P2P connectivity has changed
+            intentFilter.addAction(WifiP2pManager.WIFI_P2P_CONNECTION_CHANGED_ACTION);
+            // Indicates this device's details have changed.
+            intentFilter.addAction(WifiP2pManager.WIFI_P2P_THIS_DEVICE_CHANGED_ACTION);
+            registerReceiver(p2pBroadcastReceiver, intentFilter);
+            Log.i(TAG, "P2P BroadcastReceiver registered");
+        }
 
-        registerReceiver(p2pBroadcastReceiver, intentFilter);
-        Log.i(TAG, "P2P BroadcastReceiver registered");
+
     }
 
     /**
@@ -209,6 +213,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         // Indicates that Wi-Fi has been enabled, disabled, enabling, disabling, or unknown
         wifiIntentFilter.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
         wifiIntentFilter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
+        wifiIntentFilter.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
         registerReceiver(wifiBroadcastReceiver, wifiIntentFilter);
         Log.i(TAG, "Wi-Fi BroadcastReceiver registered");
     }
@@ -244,6 +249,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         if (wifiP2pInfo.groupFormed) {
             if (stopDiscoveryAfterGroupFormed) {
                 stopServiceDiscovery();
+                stopPeerDiscovery(); //stop all discovery once group is formed
             }
 
 //            Thread handler;
@@ -283,34 +289,36 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         );
 
         // Only add a local service if clearLocalServices succeeds
-        wifiP2pManager.clearLocalServices(channel, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                // Add the local service
-                wifiP2pManager.addLocalService(channel, wifiP2pServiceInfo, new WifiP2pManager.ActionListener() {
-                    @Override
-                    public void onSuccess() {
-                        Log.i(TAG, "Local service added");
-                        synchronized (peerDiscoveryLock) {
-                            localServicePeerDiscoveryKickEnabled = true; // Enable discover peers on local service
+        if(wifiP2pManager != null) {
+            wifiP2pManager.clearLocalServices(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    // Add the local service
+                    wifiP2pManager.addLocalService(channel, wifiP2pServiceInfo, new WifiP2pManager.ActionListener() {
+                        @Override
+                        public void onSuccess() {
+                            Log.i(TAG, "Local service added");
+                            synchronized (peerDiscoveryLock) {
+                                localServicePeerDiscoveryKickEnabled = true; // Enable discover peers on local service
+                            }
+                            discoverPeers(peerDiscoveryInterval);
                         }
-                        discoverPeers(peerDiscoveryInterval);
-                    }
 
-                    @Override
-                    public void onFailure(int reason) {
-                        Log.e(TAG, "Failure adding local service: " + FailureReason.fromInteger(reason).toString());
-                        wifiP2pServiceInfo = null;
-                    }
-                });
-            }
+                        @Override
+                        public void onFailure(int reason) {
+                            Log.e(TAG, "Failure adding local service: " + FailureReason.fromInteger(reason).toString());
+                            wifiP2pServiceInfo = null;
+                        }
+                    });
+                }
 
-            @Override
-            public void onFailure(int reason) {
-                Log.e(TAG, "Failure clearing local services: " + FailureReason.fromInteger(reason).toString());
-                wifiP2pServiceInfo = null;
-            }
-        });
+                @Override
+                public void onFailure(int reason) {
+                    Log.e(TAG, "Failure clearing local services: " + FailureReason.fromInteger(reason).toString());
+                    wifiP2pServiceInfo = null;
+                }
+            });
+        }
     }
 
     @Override
@@ -348,6 +356,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                     // Remove any persistent group
                     for (int netid = 0; netid < 32; netid++) {
                         methods[i].invoke(wifiP2pManager, channel, netid, null);
+                        Log.i(TAG, "deletePersistentGroup groups netid:" + netid);
                     }
                 }
             }
@@ -410,14 +419,20 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                 // Not sure if we want to track the map here or just send the service in the request to let the caller do
                 // what it wants with it
 
-                Log.i(TAG, "DNS-SD service available");
-                Log.i(TAG, "Local service found: " + instanceName);
-                Log.i("TAG", "Source device: ");
-                Log.i(TAG, p2pDeviceToString(srcDevice));
-                dnsSdServiceMap.put(srcDevice.deviceAddress, new DnsSdService(instanceName, registrationType, srcDevice));
-                Intent intent = new Intent(Action.DNS_SD_SERVICE_AVAILABLE);
-                intent.putExtra(SERVICE_MAP_KEY, srcDevice.deviceAddress);
-                localBroadcastManager.sendBroadcast(intent);
+                if (registrationType.startsWith(ServiceType.PRESENCE_TCP.toString())) {
+
+                    Log.i(TAG, "DNS-SD service available");
+                    Log.i(TAG, "Local service found: " + instanceName);
+                    Log.i("TAG", "Source device: ");
+                    Log.i(TAG, p2pDeviceToString(srcDevice));
+                    dnsSdServiceMap.put(srcDevice.deviceAddress, new DnsSdService(instanceName, registrationType, srcDevice));
+                    Intent intent = new Intent(Action.DNS_SD_SERVICE_AVAILABLE);
+                    intent.putExtra(SERVICE_MAP_KEY, srcDevice.deviceAddress);
+                    localBroadcastManager.sendBroadcast(intent);
+                } else {
+                    Log.i(TAG, "Not our Service, :" + ServiceType.PRESENCE_TCP.toString() + "!=" + registrationType + ":");
+                }
+
             }
         };
 
@@ -426,7 +441,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     }
 
     private void addServiceDiscoveryRequest() {
-        serviceRequest = WifiP2pDnsSdServiceRequest.newInstance();
+        serviceRequest = WifiP2pDnsSdServiceRequest.newInstance(ServiceType.PRESENCE_TCP.toString());
 
         // Tell the framework we want to scan for services. Prerequisite for discovering services
         wifiP2pManager.addServiceRequest(channel, serviceRequest, new WifiP2pManager.ActionListener() {
@@ -484,8 +499,22 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                  */
                 if (reason == WifiP2pManager.NO_SERVICE_REQUESTS && isDiscovering) {
                     Log.w(TAG, "Detected failure due to NO_SERVICE_REQUESTS whilst isDiscovering. Resetting service discovery");
-                    resetServiceDiscovery();
+                    //resetServiceDiscovery();
                 }
+            }
+        });
+    }
+
+    public void disconnectDevices() {
+        wifiP2pManager.cancelConnect(channel, new WifiP2pManager.ActionListener() {
+            @Override
+            public void onSuccess() {
+                Log.i(TAG, "cancel Connect Service");
+            }
+
+            @Override
+            public void onFailure(int i) {
+                Log.i(TAG, "cancel Connect Failure");
             }
         });
     }
@@ -584,7 +613,10 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * @return Whether Wi-Fi is enabled or not
      */
     public boolean isWifiEnabled() {
-        return wifiManager.isWifiEnabled();
+        if(wifiManager != null) {
+            return wifiManager.isWifiEnabled();
+        }
+        return false;
     }
 
     /**
@@ -642,20 +674,22 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         wifiP2pConfig.deviceAddress = service.getSrcDevice().deviceAddress;
         wifiP2pConfig.wps.setup = WpsInfo.PBC;
 
-        // Starts a peer-to-peer connection with a device with the specified configuration
-        wifiP2pManager.connect(channel, wifiP2pConfig, new WifiP2pManager.ActionListener() {
-            // The ActionListener only notifies that initiation of connection has succeeded or failed
+        if(wifiP2pManager != null) {
+            // Starts a peer-to-peer connection with a device with the specified configuration
+            wifiP2pManager.connect(channel, wifiP2pConfig, new WifiP2pManager.ActionListener() {
+                // The ActionListener only notifies that initiation of connection has succeeded or failed
 
-            @Override
-            public void onSuccess() {
-                Log.i(TAG, "Initiating connection to service");
-            }
+                @Override
+                public void onSuccess() {
+                    Log.i(TAG, "Initiating connection to service");
+                }
 
-            @Override
-            public void onFailure(int reason) {
-                Log.e(TAG, "Failure initiating connection to service: " + FailureReason.fromInteger(reason).toString());
-            }
-        });
+                @Override
+                public void onFailure(int reason) {
+                    Log.e(TAG, "Failure initiating connection to service: " + FailureReason.fromInteger(reason).toString());
+                }
+            });
+        }
     }
 
     /**
@@ -737,6 +771,24 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
             handleWifiStateChanged(intent);
         } else if (WifiManager.SCAN_RESULTS_AVAILABLE_ACTION.equals(action)) {
             handleScanResultsAvailable(intent);
+        } else if (WifiManager.NETWORK_STATE_CHANGED_ACTION.equals(action)) {
+            NetworkInfo info = intent.getParcelableExtra(WifiManager.EXTRA_NETWORK_INFO);
+            if (info != null) {
+                if (info.isConnected()) {
+                    Log.i(TAG, "ConectionStateConnected");
+                    hadConnection = true;
+                } else if (info.isConnectedOrConnecting()) {
+                    Log.i(TAG, "ConectionStateConnecting");
+                } else {
+                    if (hadConnection) {
+                        Log.i(TAG, "ConectionStateDisconnected");
+                    } else {
+                        Log.i(TAG, "ConectionStatePreConnecting");
+                    }
+                }
+
+
+            }
         }
     }
 
@@ -790,7 +842,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         if (wifiP2pManager != null) {
             synchronized (peerDiscoveryLock) {
                 boolean peerDiscoveryRequired = isPeerDiscoveryRequired();
-                if(peerDiscoveryRequired) {
+                if (peerDiscoveryRequired) {
                     Log.i(TAG, "List of discovered peers changed");
                     wifiP2pManager.requestPeers(channel, new WifiP2pManager.PeerListListener() {
                         @Override
@@ -1179,14 +1231,15 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
 
     private boolean isPeerDiscoveryRequired() {
         synchronized (peerDiscoveryLock) {
-            return isDiscoveringPeers || (wifiP2pServiceInfo != null && localServicePeerDiscoveryKickEnabled);
+            return (wifiP2pServiceInfo != null && localServicePeerDiscoveryKickEnabled);
         }
     }
 
     public void stopPeerDiscovery() {
         synchronized (peerDiscoveryLock) {
             Log.i(TAG, "stopPeerDiscovery");
-            isDiscoveringPeers = false;
+//            isDiscoveringPeers = false;
+            localServicePeerDiscoveryKickEnabled = false;
         }
     }
 
@@ -1254,13 +1307,13 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         return localServicePeerDiscoveryKickEnabled;
     }
 
-    public void continuouslyDiscoverPeers() {
-        if (!isDiscoveringPeers) {
-            Log.i(TAG, "Continuously discover peers: starting");
-            isDiscoveringPeers = true;
-            discoverPeers();
-        } else {
-            Log.i(TAG, "Continuously discover peers, already discovering.");
-        }
-    }
+//    public void continuouslyDiscoverPeers() {
+//        if (!isDiscoveringPeers) {
+//            Log.i(TAG, "Continuously discover peers: starting");
+//            isDiscoveringPeers = true;
+//            discoverPeers();
+//        } else {
+//            Log.i(TAG, "Continuously discover peers, already discovering.");
+//        }
+//    }
 }
