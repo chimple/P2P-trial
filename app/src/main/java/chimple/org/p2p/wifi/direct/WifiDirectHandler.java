@@ -31,6 +31,8 @@ import android.util.Log;
 
 import java.io.IOException;
 import java.lang.reflect.Method;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -39,6 +41,8 @@ import java.util.Timer;
 import java.util.TimerTask;
 
 import chimple.org.p2p.errors.FailureReason;
+
+import static chimple.org.p2p.ui.views.MainFragment.TXTRECORD_PROP_AVAILABLE;
 
 public class WifiDirectHandler extends WifiDirectIntentService implements
         WifiP2pManager.ConnectionInfoListener,
@@ -54,6 +58,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     private final String PEERS = "peers";
     private final String WIFI_STATE = "wifiState";
 
+    private Map<String, NoPromptRecord> noPromptRecordMap;
     private Map<String, DnsSdTxtRecord> dnsSdTxtRecordMap;
     private Map<String, DnsSdService> dnsSdServiceMap;
     private List<ServiceDiscoveryTask> serviceDiscoveryTasks;
@@ -105,6 +110,11 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     private WifiP2pGroup wifiP2pGroup;
     private List<ScanResult> wifiScanResults;
 
+    private String mNetworkName = "";
+    private String mPassphrase = "";
+    private String mInetAddress = "";
+    String intetAddress = "";
+
     /**
      * Constructor
      **/
@@ -112,6 +122,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         super(ANDROID_SERVICE_NAME);
         dnsSdTxtRecordMap = new HashMap<>();
         dnsSdServiceMap = new HashMap<>();
+        noPromptRecordMap = new HashMap<>();
         peers = new WifiP2pDeviceList();
     }
 
@@ -246,6 +257,10 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         this.groupFormed = wifiP2pInfo.groupFormed;
         this.isGroupOwner = wifiP2pInfo.isGroupOwner;
 
+        if (wifiP2pInfo.isGroupOwner) {
+            mInetAddress = wifiP2pInfo.groupOwnerAddress.getHostAddress();
+        }
+
         if (wifiP2pInfo.groupFormed) {
             if (stopDiscoveryAfterGroupFormed) {
                 stopServiceDiscovery();
@@ -264,8 +279,18 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                 }
             } else {
                 Log.i(TAG, "Connected as peer");
-                socketHandler = new WifiDirectClientSocketHandler(this.getHandler(), wifiP2pInfo.groupOwnerAddress);
-                socketHandler.start();
+                if(isCreatingNoPrompt) {
+                    try {
+                        socketHandler = new WifiDirectClientSocketHandler(this.getHandler(), InetAddress.getByName(this.intetAddress));
+                        socketHandler.start();
+                    } catch (Exception e) {
+
+                    }
+
+                } else {
+                    socketHandler = new WifiDirectClientSocketHandler(this.getHandler(), wifiP2pInfo.groupOwnerAddress);
+                    socketHandler.start();
+                }
             }
 
 //            localBroadcastManager.sendBroadcast(new Intent(Action.SERVICE_CONNECTED));
@@ -289,7 +314,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         );
 
         // Only add a local service if clearLocalServices succeeds
-        if(wifiP2pManager != null) {
+        if (wifiP2pManager != null) {
             wifiP2pManager.clearLocalServices(channel, new WifiP2pManager.ActionListener() {
                 @Override
                 public void onSuccess() {
@@ -426,6 +451,21 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                     Log.i("TAG", "Source device: ");
                     Log.i(TAG, p2pDeviceToString(srcDevice));
                     dnsSdServiceMap.put(srcDevice.deviceAddress, new DnsSdService(instanceName, registrationType, srcDevice));
+
+                    if (instanceName != null) {
+                        String[] separated = instanceName.split(":");
+                        if (separated != null && separated.length == 4) {
+                            Log.i(TAG + ": SS", "found SSID:" + separated[1] + ", pwd:" + separated[2] + "IP: " + separated[3]);
+
+                            Map<String, String> info = new HashMap<String, String>();
+                            info.put(Keys.NO_PROMPT_NETWORK_NAME, separated[1]);
+                            info.put(Keys.NO_PROMPT_NETWORK_PASS, separated[2]);
+                            info.put(Keys.NO_PROMPT_INETADDRESS, separated[3]);
+                            NoPromptRecord noPromptRecord = new NoPromptRecord(info);
+                            noPromptRecordMap.put(instanceName, noPromptRecord);
+                        }
+                    }
+
                     Intent intent = new Intent(Action.DNS_SD_SERVICE_AVAILABLE);
                     intent.putExtra(SERVICE_MAP_KEY, srcDevice.deviceAddress);
                     localBroadcastManager.sendBroadcast(intent);
@@ -501,20 +541,6 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                     Log.w(TAG, "Detected failure due to NO_SERVICE_REQUESTS whilst isDiscovering. Resetting service discovery");
                     //resetServiceDiscovery();
                 }
-            }
-        });
-    }
-
-    public void disconnectDevices() {
-        wifiP2pManager.cancelConnect(channel, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                Log.i(TAG, "cancel Connect Service");
-            }
-
-            @Override
-            public void onFailure(int i) {
-                Log.i(TAG, "cancel Connect Failure");
             }
         });
     }
@@ -613,7 +639,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * @return Whether Wi-Fi is enabled or not
      */
     public boolean isWifiEnabled() {
-        if(wifiManager != null) {
+        if (wifiManager != null) {
             return wifiManager.isWifiEnabled();
         }
         return false;
@@ -623,6 +649,8 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * Removes a registered local service.
      */
     public void removeService() {
+        mNetworkName = "";
+        mPassphrase = "";
         if (wifiP2pServiceInfo != null) {
             Log.i(TAG, "Removing local service");
             wifiP2pManager.removeLocalService(channel, wifiP2pServiceInfo, new WifiP2pManager.ActionListener() {
@@ -674,7 +702,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         wifiP2pConfig.deviceAddress = service.getSrcDevice().deviceAddress;
         wifiP2pConfig.wps.setup = WpsInfo.PBC;
 
-        if(wifiP2pManager != null) {
+        if (wifiP2pManager != null) {
             // Starts a peer-to-peer connection with a device with the specified configuration
             wifiP2pManager.connect(channel, wifiP2pConfig, new WifiP2pManager.ActionListener() {
                 // The ActionListener only notifies that initiation of connection has succeeded or failed
@@ -697,26 +725,26 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * access point and broadcasting the password for peers to use. Peers connect via normal wifi, not
      * wifi direct, but the effect is the same.
      */
-    public void startAddingNoPromptService(WifiDirectServiceData serviceData) {
+    public void startAddingNoPromptService() {
         if (wifiP2pServiceInfo != null) {
             removeService();
         }
         isCreatingNoPrompt = true;
-        noPromptServiceData = serviceData;
+        if (wifiP2pManager != null) {
+            wifiP2pManager.createGroup(channel, new WifiP2pManager.ActionListener() {
+                @Override
+                public void onSuccess() {
+                    Log.i(TAG, "Group created successfully");
+                    //Note that you will have to wait for WIFI_P2P_CONNECTION_CHANGED_INTENT for group info
+                }
 
-        wifiP2pManager.createGroup(channel, new WifiP2pManager.ActionListener() {
-            @Override
-            public void onSuccess() {
-                Log.i(TAG, "Group created successfully");
-                //Note that you will have to wait for WIFI_P2P_CONNECTION_CHANGED_INTENT for group info
-            }
+                @Override
+                public void onFailure(int reason) {
+                    Log.i(TAG, "Group creation failed: " + FailureReason.fromInteger(reason));
 
-            @Override
-            public void onFailure(int reason) {
-                Log.i(TAG, "Group creation failed: " + FailureReason.fromInteger(reason));
-
-            }
-        });
+                }
+            });
+        }
     }
 
     /**
@@ -727,20 +755,23 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
     public void connectToNoPromptService(DnsSdService service) {
         removeService();
         WifiConfiguration configuration = new WifiConfiguration();
-        DnsSdTxtRecord txtRecord = dnsSdTxtRecordMap.get(service.getSrcDevice().deviceAddress);
-        if (txtRecord == null) {
-            Log.e(TAG, "No dnsSdTxtRecord found for the no prompt service");
+        NoPromptRecord noPromptRecord = noPromptRecordMap.get(service.getInstanceName());
+        if (noPromptRecord == null) {
+            Log.e(TAG, "No noPromptRecord found for the no prompt service");
             return;
         }
         // Quotes around these are required
-        configuration.SSID = "\"" + txtRecord.getRecord().get(Keys.NO_PROMPT_NETWORK_NAME) + "\"";
-        configuration.preSharedKey = "\"" + txtRecord.getRecord().get(Keys.NO_PROMPT_NETWORK_PASS) + "\"";
+        configuration.SSID = "\"" + noPromptRecord.getRecord().get(Keys.NO_PROMPT_NETWORK_NAME) + "\"";
+        configuration.preSharedKey = "\"" + noPromptRecord.getRecord().get(Keys.NO_PROMPT_NETWORK_PASS) + "\"";
         int netId = wifiManager.addNetwork(configuration);
+        String ipAddress = "\"" + noPromptRecord.getRecord().get(Keys.NO_PROMPT_INETADDRESS) + "\"";
 
         //disconnect form current network and connect to this one
         wifiManager.disconnect();
         wifiManager.enableNetwork(netId, true);
         wifiManager.reconnect();
+        WifiDirectHandler.this.SetInetAddress(ipAddress);
+
         Log.i(TAG, "Connected to no prompt network");
     }
 
@@ -871,6 +902,7 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
      * @param intent
      */
     private void handleConnectionChanged(Intent intent) {
+
         Log.i(TAG, "Wi-Fi P2P Connection Changed");
 
         if (wifiP2pManager == null) {
@@ -896,6 +928,20 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                     Log.i(TAG, "WifiP2pGroup:");
                     Log.i(TAG, p2pGroupToString(wifiP2pGroup));
                     WifiDirectHandler.this.wifiP2pGroup = wifiP2pGroup;
+
+                    if (isCreatingNoPrompt) {
+                        if (mNetworkName.equals(wifiP2pGroup.getNetworkName()) && mPassphrase.equals(wifiP2pGroup.getPassphrase())) {
+                            Log.i(TAG, "Already have local service for " + mNetworkName + " ," + mPassphrase);
+                        } else {
+
+                            mNetworkName = wifiP2pGroup.getNetworkName();
+                            mPassphrase = wifiP2pGroup.getPassphrase();
+                            HashMap<String, String> record = new HashMap<>();
+                            record.put(TXTRECORD_PROP_AVAILABLE, "visible");
+                            String instanceName = "NI:" + wifiP2pGroup.getNetworkName() + ":" + wifiP2pGroup.getPassphrase() + ":" + mInetAddress;
+                            addLocalService(instanceName, record);
+                        }
+                    }
                 }
             }
         });
@@ -1015,12 +1061,15 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
                 DEVICE_CHANGED = "deviceChanged",
                 MESSAGE_RECEIVED = "messageReceived",
                 WIFI_STATE_CHANGED = "wifiStateChanged",
-                COMMUNICATION_DISCONNECTED = "communicationDisconnected";
+                COMMUNICATION_DISCONNECTED = "communicationDisconnected",
+                DSS_WIFISS_PEERAPINFO = "DSS_WIFISS_PEERAPINFO";
+
     }
 
     private class Keys {
         public static final String NO_PROMPT_NETWORK_NAME = "networkName",
-                NO_PROMPT_NETWORK_PASS = "passphrase";
+                NO_PROMPT_NETWORK_PASS = "passphrase",
+                NO_PROMPT_INETADDRESS = "noPromptInetAddress";
     }
 
     // TODO: Add JavaDoc
@@ -1307,13 +1356,15 @@ public class WifiDirectHandler extends WifiDirectIntentService implements
         return localServicePeerDiscoveryKickEnabled;
     }
 
-//    public void continuouslyDiscoverPeers() {
-//        if (!isDiscoveringPeers) {
-//            Log.i(TAG, "Continuously discover peers: starting");
-//            isDiscoveringPeers = true;
-//            discoverPeers();
-//        } else {
-//            Log.i(TAG, "Continuously discover peers, already discovering.");
-//        }
-//    }
+    public void SetInetAddress(String address) {
+        this.intetAddress = address;
+    }
+
+    public String GetInetAddress() {
+        return this.intetAddress;
+    }
+
+    public boolean isCreatingNoPrompt() {
+        return this.isCreatingNoPrompt;
+    }
 }

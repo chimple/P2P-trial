@@ -200,7 +200,12 @@ public class MainActivity extends AppCompatActivity implements WiFiDirectHandler
                 sourceDeviceName = "other device";
             }
             Toast.makeText(this, "Inviting " + sourceDeviceName + " to connect", Toast.LENGTH_LONG).show();
-            wifiDirectHandler.initiateConnectToService(service);
+            if(wifiDirectHandler.isCreatingNoPrompt()) {
+                wifiDirectHandler.connectToNoPromptService(service);
+            } else {
+                wifiDirectHandler.initiateConnectToService(service);
+            }
+
         } else {
             Log.e(TAG, "Service not available");
             Toast.makeText(this, "Service not available", Toast.LENGTH_LONG).show();

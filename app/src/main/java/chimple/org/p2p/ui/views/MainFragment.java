@@ -112,7 +112,7 @@ public class MainFragment extends Fragment {
             public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
                 Log.i(TAG, "\nNo-Prompt Service Registration Switch Toggled");
                 if (isChecked) {
-                    getHandler().startAddingNoPromptService(null);
+                    getHandler().startAddingNoPromptService();
                     serviceRegistrationSwitch.setEnabled(false);
                 } else {
                     // Remove no-prompt local service
